@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 
 // Connect to the Backend
-const socket = io("http://localhost:3001");
+const socket = io("https://neuroshield-api.onrender.com");
 
 function App() {
   // --- STATE VARIABLES ---
@@ -18,7 +18,7 @@ function App() {
 
   useEffect(() => {
     // 1. ON LOAD: FETCH OLD HISTORY FROM MONGODB
-    fetch('http://localhost:3001/api/history')
+    fetch('https://neuroshield-api.onrender.com/api/history')
         .then(res => res.json())
         .then(data => {
             console.log("Loaded history from DB:", data);
