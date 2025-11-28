@@ -1,143 +1,174 @@
 import { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 
-// Connect to the Backend
+// CONNECT TO YOUR RENDER BACKEND
 const socket = io("https://neuroshield-api.onrender.com");
 
 function App() {
-  // --- STATE VARIABLES ---
-  const [log, setLog] = useState("Listening for neighbor...");
-  const [stressColor, setStressColor] = useState("#e0e0e0"); // Default Grey
+  // --- STATE ---
+  const [log, setLog] = useState("System Standby...");
+  const [stressColor, setStressColor] = useState("#e0e0e0"); 
   const [status, setStatus] = useState("CALM");
-  
-  // The Evidence Log (History)
   const [history, setHistory] = useState([]);
-
-  // A "Ref" to keep track of history inside the socket listener
   const historyRef = useRef([]);
+  
+  // --- AUDIO ENGINE REFS ---
+  const audioContextRef = useRef(null);
+  const gainNodeRef = useRef(null);
+  const isAudioActive = useRef(false);
+
+  // --- 1. THE SONIC WEAPON (Brown Noise Generator) ---
+  const initAudio = () => {
+    if (isAudioActive.current) return;
+
+    // Create the Audio Context
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const ctx = new AudioContext();
+    audioContextRef.current = ctx;
+
+    // Create Brown Noise Buffer (Mathematical Noise)
+    const bufferSize = ctx.sampleRate * 2; // 2 seconds of noise
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        // Brown noise formula (integrate white noise)
+        data[i] = (lastOut + (0.02 * white)) / 1.02;
+        lastOut = data[i];
+        data[i] *= 3.5; // Boost raw amplitude
+    }
+
+    // Create Source and Volume Control (Gain)
+    const noiseSource = ctx.createBufferSource();
+    noiseSource.buffer = buffer;
+    noiseSource.loop = true;
+    
+    const gainNode = ctx.createGain();
+    gainNode.gain.value = 0.05; // Start very low (Background hum)
+    
+    noiseSource.connect(gainNode);
+    gainNode.connect(ctx.destination);
+    
+    noiseSource.start();
+    gainNodeRef.current = gainNode;
+    isAudioActive.current = true;
+    setLog("AUDIO SHIELD: ARMED");
+  };
+
+  let lastOut = 0;
+
+  // --- 2. THE TRIGGER RESPONSE ---
+  const activateShield = () => {
+      if (!gainNodeRef.current) return;
+      
+      // INSTANTLY SPIKE VOLUME TO 80%
+      const now = audioContextRef.current.currentTime;
+      const gain = gainNodeRef.current.gain;
+      
+      gain.cancelScheduledValues(now);
+      gain.setValueAtTime(gain.value, now);
+      
+      // Attack: Go loud in 0.1 seconds
+      gain.linearRampToValueAtTime(0.8, now + 0.1); 
+      
+      // Decay: Fade back to background level after 4 seconds
+      gain.exponentialRampToValueAtTime(0.05, now + 4);
+  };
 
   useEffect(() => {
-    // 1. ON LOAD: FETCH OLD HISTORY FROM MONGODB
+    // Fetch History Logic (Same as before)
     fetch('https://neuroshield-api.onrender.com/api/history')
         .then(res => res.json())
         .then(data => {
-            console.log("Loaded history from DB:", data);
-            
-            // Format the DB data for our UI
             const formatted = data.map(item => ({
                 time: new Date(item.timestamp).toLocaleTimeString(),
                 message: item.content
             }));
-            
-            // Update State and Ref
             setHistory(formatted);
             historyRef.current = formatted;
         })
-        .catch(err => console.error("Failed to load history:", err));
+        .catch(console.error);
 
-    // 2. LISTEN FOR NEW REAL-TIME EVENTS
+    // Socket Listener
     socket.on("neighbor_event", (packet) => {
       setLog(packet.content);
 
-      // --- LOGIC: DECIDE THE COLOR & STATUS ---
       if (packet.type === "TRIGGER") {
-        setStressColor("#ff4d4d"); // RED (Panic)
-        setStatus("PANIC: CORTICAL OVERLOAD");
+        setStressColor("#ff4d4d"); 
+        setStatus("PANIC: SHIELD DEPLOYED");
         
-        // Create the new log entry
+        // --- FIRE THE AUDIO WEAPON ---
+        activateShield();
+        
+        // Log Logic
         const newLog = {
             time: new Date().toLocaleTimeString(),
             message: packet.content,
         };
-        
-        // Add new log to the TOP of the list (keep only last 10)
         const updatedHistory = [newLog, ...historyRef.current].slice(0, 10);
-        
-        // Update both Ref and State
         historyRef.current = updatedHistory;
         setHistory(updatedHistory);
 
       } else if (packet.content.includes("CENSORED")) {
-        setStressColor("#ffcc00"); // YELLOW (Blocked Dirty Thought)
+        setStressColor("#ffcc00");
         setStatus("FILTERING DIRTY THOUGHT");
       } else {
-        setStressColor("#85e085"); // GREEN (Safe)
+        setStressColor("#85e085");
         setStatus("CALM");
       }
     });
 
-    // Cleanup: Turn off the ear when the app closes
     return () => socket.off("neighbor_event");
   }, []);
 
   return (
     <div style={{ 
-      minHeight: '100vh', 
-      width: '100vw',
-      backgroundColor: stressColor, // Dynamic Background
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      alignItems: 'center',
-      fontFamily: 'Arial',
-      transition: 'background-color 0.5s ease', // Smooth color fade
-      padding: '20px',
-      boxSizing: 'border-box'
+      minHeight: '100vh', width: '100vw', backgroundColor: stressColor, 
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      fontFamily: 'Arial', transition: 'background-color 0.2s ease', padding: '20px'
     }}>
       
-      <h1 style={{ color: '#333', marginBottom: '10px' }}>NEUROSHIELD v1.0</h1>
+      <h1 style={{ color: '#333' }}>NEUROSHIELD ACTIVE DEFENSE</h1>
 
-      {/* THE MAIN MONITOR */}
+      {/* ACTIVATE BUTTON (Browsers require 1 click to allow audio) */}
+      {!isAudioActive.current && (
+          <button 
+            onClick={() => initAudio()}
+            style={{
+                padding: '15px 30px', fontSize: '20px', fontWeight: 'bold',
+                backgroundColor: 'black', color: 'white', border: 'none',
+                borderRadius: '50px', cursor: 'pointer', marginBottom: '20px',
+                boxShadow: '0 0 20px rgba(0,0,0,0.5)'
+            }}
+          >
+            🔊 CLICK TO ARM AUDIO SHIELD
+          </button>
+      )}
+
       <div style={{ 
-        padding: '30px', 
-        backgroundColor: 'white', 
-        borderRadius: '15px',
-        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-        textAlign: 'center',
-        marginBottom: '20px',
-        maxWidth: '600px',
-        width: '100%'
+        padding: '30px', backgroundColor: 'white', borderRadius: '15px',
+        textAlign: 'center', marginBottom: '20px', width: '100%', maxWidth: '600px'
       }}>
-        <h2 style={{ margin: 0, color: '#555' }}>STATUS: {status}</h2>
-        <hr style={{ margin: '15px 0', opacity: 0.3 }}/>
-        <h1 style={{ fontSize: '28px', fontWeight: 'bold', minHeight: '60px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          {log}
-        </h1>
+        <h2>STATUS: {status}</h2>
+        <hr/>
+        <h1 style={{ fontSize: '28px', fontWeight: 'bold' }}>{log}</h1>
       </div>
 
-      {/* THE EVIDENCE LOG */}
       <div style={{
-          width: '100%',
-          maxWidth: '600px',
-          backgroundColor: 'rgba(255, 255, 255, 0.9)',
-          borderRadius: '10px',
-          padding: '20px',
-          boxShadow: '0 5px 15px rgba(0,0,0,0.1)'
+          width: '100%', maxWidth: '600px', backgroundColor: 'rgba(255,255,255,0.9)',
+          borderRadius: '10px', padding: '20px'
       }}>
-          <h3 style={{ margin: '0 0 15px 0', borderBottom: '2px solid #333', paddingBottom: '10px' }}>
-            📝 Police Evidence Log (Last 10 Incidents)
-          </h3>
-          
-          {history.length === 0 ? <p style={{ color: '#777', fontStyle: 'italic' }}>No recent incidents recorded in database.</p> : null}
-          
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+          <h3>📝 Incident Log</h3>
+          <ul style={{ listStyle: 'none', padding: 0 }}>
               {history.map((item, index) => (
-                  <li key={index} style={{
-                      borderBottom: '1px solid #eee',
-                      padding: '12px 5px',
-                      color: '#d63031', // Red Text
-                      fontWeight: 'bold',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                  }}>
-                      <span style={{ textAlign: 'left', marginRight: '10px' }}>{item.message}</span>
-                      <span style={{ color: 'black', fontSize: '0.8em', minWidth: '80px', textAlign: 'right' }}>{item.time}</span>
+                  <li key={index} style={{ borderBottom: '1px solid #ccc', padding: '10px', color: 'red', display: 'flex', justifyContent: 'space-between' }}>
+                      <span>{item.message}</span>
+                      <span style={{ color: 'black', fontSize: '0.8em' }}>{item.time}</span>
                   </li>
               ))}
           </ul>
       </div>
-
     </div>
   );
 }
