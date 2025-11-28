@@ -98,7 +98,16 @@ function startNeighbor(socket) {
             finalType = "SAFE_NOISE";
         } 
         else {
-            const detected = triggerTrie.searchInSentence(message);
+            // --- PATTERN MATCHER UPGRADE (Fixes "Tobacco Smell") ---
+            let detected = null;
+            
+            // Scan the message for ANY of our triggers (Phrases OR Words)
+            for (const t of triggers) {
+                if (message.includes(t)) {
+                    detected = t;
+                    break; // Found one! Stop searching.
+                }
+            }
             
             if (detected) {
                 console.log(`!!! TRIGGER DETECTED: ${detected} !!!`);
@@ -142,3 +151,4 @@ server.listen(PORT, () => {
     console.log(`NEOCORTEX ONLINE: Listening on Port ${PORT}`);
 });
 // NEUROSHIELD FINAL DEPLOYMENT - TOBACCO PATCH
+// v1.2 TOBACCO FIX
