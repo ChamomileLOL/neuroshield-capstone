@@ -1,4 +1,4 @@
-// 1. LOAD ENVIRONMENT VARIABLES (Must be at the very top)
+// 1. LOAD ENVIRONMENT VARIABLES
 require('dotenv').config();
 
 const express = require('express');
@@ -14,28 +14,26 @@ const Incident = require('./IncidentModel');
 
 const app = express();
 app.use(cors());
-// --- NEW: API TO FETCH HISTORY ---
+
+// --- API TO FETCH HISTORY ---
 app.get('/api/history', async (req, res) => {
     try {
-        // Fetch the last 10 incidents, sorted by newest first
-        const history = await Incident.find().sort({ timestamp: -1 }).limit(10);
+        const history = await Incident.find().sort({ timestamp: -1 }).limit(20); // Increased to 20
         res.json(history);
     } catch (err) {
         res.status(500).json({ error: "Could not fetch history" });
     }
 });
 
-// --- 2. CONNECT TO MONGODB ATLAS (USING .ENV) ---
-const uri = process.env.MONGO_URI; // <--- This reads from your .env file
-
+// --- CONNECT TO MONGODB ATLAS ---
+const uri = process.env.MONGO_URI;
 if (!uri) {
     console.error("CRITICAL ERROR: MONGO_URI is missing in .env file!");
     process.exit(1);
 }
-
 mongoose.connect(uri)
-    .then(() => console.log(">> MEMORY CORE (ATLAS CLOUD): CONNECTED SUCCESSFULLY"))
-    .catch(err => console.error(">> MEMORY ERROR: Connection Failed!", err));
+    .then(() => console.log(">> MEMORY CORE: CONNECTED"))
+    .catch(err => console.error(">> MEMORY ERROR:", err));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -46,29 +44,23 @@ const io = new Server(server, {
 const dirtyFilter = new BloomFilter(100);
 dirtyFilter.add("DIRTY_WORD_XXX");
 
-const triggerTrie = new Trie();
 const triggers = [
-    "MURMURING",
-    "SCREAMING",
-    "AGGRESSIVE SCREAMING IN BHOJPURI",
-    "MURMURING IN VERNACULAR MARATHI",
-    "GOSSIPPING",
-    "SINGING BHOJPURI SONGS",
-    "MAKING CROW SOUNDS",
-    "INDIAN MALE DOG BARKING",
-    "LOCAL GOSSIP SESSIONS",
-    "BAD FISH ROTTEN SMELL OF INDIAN FISHERWOMEN",
-    "TOBACCO SMELL"
+    "MURMURING", "SCREAMING", "AGGRESSIVE SCREAMING IN BHOJPURI",
+    "MURMURING IN VERNACULAR MARATHI", "GOSSIPPING", "SINGING BHOJPURI SONGS",
+    "MAKING CROW SOUNDS", "INDIAN MALE DOG BARKING", "LOCAL GOSSIP SESSIONS",
+    "BAD FISH ROTTEN SMELL OF INDIAN FISHERWOMEN", "TOBACCO SMELL"
 ];
+// (Trie is kept for legacy, but we use Pattern Matching now)
+const triggerTrie = new Trie();
 triggers.forEach(t => triggerTrie.insert(t));
 
 
-// --- THE NEIGHBOR SIMULATION ---
-function startNeighbor(socket) {
-    console.log("Neighbor: *Starts existing loudly*");
+// --- THE GLOBAL NEIGHBOR (RUNS 24/7) ---
+// Note: We pass 'io' so we can broadcast to anyone listening
+function startGlobalSimulation(io) {
+    console.log(">> GLOBAL SIMULATION STARTED: Neighbor is active.");
 
-    const neighborInterval = setInterval(async () => {
-        
+    setInterval(async () => {
         const soundProfile = [
             { text: "Just walking around", type: "SAFE" },
             { text: "Cooking in the kitchen", type: "SAFE" },
@@ -98,14 +90,12 @@ function startNeighbor(socket) {
             finalType = "SAFE_NOISE";
         } 
         else {
-            // --- PATTERN MATCHER UPGRADE (Fixes "Tobacco Smell") ---
+            // PATTERN MATCHER (Supports "TOBACCO SMELL")
             let detected = null;
-            
-            // Scan the message for ANY of our triggers (Phrases OR Words)
             for (const t of triggers) {
                 if (message.includes(t)) {
                     detected = t;
-                    break; // Found one! Stop searching.
+                    break;
                 }
             }
             
@@ -113,42 +103,43 @@ function startNeighbor(socket) {
                 console.log(`!!! TRIGGER DETECTED: ${detected} !!!`);
                 finalType = "TRIGGER"; 
 
-                // SAVE TO CLOUD DB
+                // SAVE TO CLOUD DB (Always saves, even if no one is watching)
                 try {
                     const newIncident = new Incident({
                         content: message,
                         type: "TRIGGER"
                     });
                     await newIncident.save(); 
-                    console.log(">> INCIDENT LOGGED TO CLOUD DB");
                 } catch (e) {
-                    console.log("Failed to save to DB:", e.message);
+                    console.log("DB Error:", e.message);
                 }
             } else {
                 finalType = "SAFE_NOISE";
             }
         }
 
-        socket.emit("neighbor_event", {
+        // BROADCAST TO WORLD
+        // If Xavier is watching, he hears it. If not, it falls into the void (but is saved to DB).
+        io.emit("neighbor_event", {
             id: Date.now(),
             type: finalType,
             content: message
         });
 
-    }, 1500); 
-
-    socket.on("disconnect", () => clearInterval(neighborInterval));
+    }, 3000); // Slower pace (3 seconds) for 24/7 stability
 }
+
+// START THE ENGINE IMMEDIATELY (Not inside io.on)
+startGlobalSimulation(io);
 
 io.on("connection", (socket) => {
     console.log(`Xavier Connected: ${socket.id}`);
-    startNeighbor(socket);
+    // We don't start the neighbor here anymore. She is already running.
 });
 
-// Use the PORT from .env, or default to 3001
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
     console.log(`NEOCORTEX ONLINE: Listening on Port ${PORT}`);
 });
-// NEUROSHIELD FINAL DEPLOYMENT - TOBACCO PATCH
-// v1.2 TOBACCO FIX
+
+// v2.0 GLOBAL PERSISTENCE
